@@ -670,29 +670,46 @@ The offscreen canvas uses `fillStyle = '#ffffff'` before drawing to ensure trans
 
 ---
 
-## 15. SVG Export
+## 15. SVG Export — Laser Cut Template
 
-The **Download SVG** button generates a physically accurate vector file:
+The **Download SVG** button generates a laser-cutting template for the physical base plate.
+
+### Purpose
+
+The SVG is used to laser-cut the bead holder plate — a flat sheet with a hole at every bead position. The operator places this plate on the machine bed; the CoreXY end-effector drops beads through the holes into the tray below.
+
+### Format
+
+- **No fills** — outlines only (`fill="none"`)
+- **Stroke colour: red** (`stroke="red"`) — standard colour used by laser cutter software to identify cut paths
+- **Stroke width: 0.1 mm** (`stroke-width="0.1"`) — hairline cut line
+- **Bed border** — one rectangle at the outer edge of the plate
+- **Bead holes** — one circle per bead position, all identical regardless of black/white color in the design
+- **File name:** `bead_plate_lasercut.svg`
+
+### Example output
 
 ```xml
-<svg width="400mm" height="400mm" viewBox="0 0 400 400">
-  <rect width="400" height="400" fill="#999999"/>
-  <g fill="#f0f0f0">   <!-- white beads -->
-    <circle cx="3.500" cy="3.500" r="3"/>
-    ...
-  </g>
-  <g fill="#1a1a1a">   <!-- black beads -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="400mm" height="400mm"
+     viewBox="0 0 400 400">
+  <g fill="none" stroke="red" stroke-width="0.1">
+    <rect x="0" y="0" width="400" height="400"/>  <!-- bed border -->
+    <circle cx="3.500" cy="3.500" r="3"/>          <!-- bead hole -->
     <circle cx="10.500" cy="3.500" r="3"/>
     ...
   </g>
 </svg>
 ```
 
-- `cx`, `cy` are in real mm: `cx = col × spacing + spacing/2`, `cy = row × spacing + spacing/2`
-- `r` = `beadDiameterMm / 2`
-- Circles are grouped by colour to minimise file size
+### Geometry
 
-Note: SVG Y-axis is top-down, opposite to the machine coordinate display. The SVG is for fabrication reference, not machine control.
+- `cx = col × beadSpacingMm + beadSpacingMm / 2`
+- `cy = row × beadSpacingMm + beadSpacingMm / 2`
+- `r  = beadDiameterMm / 2`
+- All values in mm; SVG `width`/`height` set in mm so scale is 1:1 physical
+
+Note: SVG Y-axis is top-down (row 0 at top). This does not affect the laser cut result since the plate is physically symmetric.
 
 ---
 
@@ -859,6 +876,15 @@ pixel_art/
 ---
 
 ## 20. Changelog
+
+### v9 — SVG export changed to laser-cut template
+
+- **Outlines only** — removed all fills; SVG now has `fill="none"` throughout
+- **Red stroke** — all paths use `stroke="red"` (standard laser-cut colour)
+- **0.1 mm stroke width** — hairline weight suitable for laser cutter cut paths
+- **Bed border added** — outer rectangle at exact bed dimensions marks the plate boundary
+- **All holes identical** — every bead position gets a circle regardless of black/white; the SVG is a cutting template, not a colour preview
+- **File renamed** — downloads as `bead_plate_lasercut.svg` to clarify its purpose
 
 ### v8 — USB Serial machine control panel
 

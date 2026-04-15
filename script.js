@@ -454,52 +454,46 @@ fileInput.addEventListener('change', e => {
   img.src = url;
 });
 
-// ── SVG download ──────────────────────────────────────────────
+// ── SVG download (laser-cut template) ────────────────────────
+// Outlines only — bed border + all bead circles as 0.1 mm red strokes.
+// No fills. Intended for laser cutting the base plate.
 document.getElementById('btn-svg').addEventListener('click', () => {
   if (!gridReady) return;
 
-  const beadR    = beadDiameterMm / 2;
-  const total    = cols * rows;
-  const whiteCnt = total - blackCount;
-  const lines    = [];
+  const beadR  = beadDiameterMm / 2;
+  const total  = cols * rows;
+  const lines  = [];
 
   lines.push(`<?xml version="1.0" encoding="UTF-8"?>`);
   lines.push(`<svg xmlns="http://www.w3.org/2000/svg"`);
   lines.push(`     width="${bedW}mm" height="${bedH}mm"`);
   lines.push(`     viewBox="0 0 ${bedW} ${bedH}">`);
-  lines.push(`  <title>Pixel Bead Placer \u2014 ${cols}\u00d7${rows}</title>`);
-  lines.push(`  <!-- Bed: ${bedW}x${bedH}mm | Bead \u00d8: ${beadDiameterMm}mm | Gap: ${beadGapMm}mm | Pitch: ${beadSpacingMm}mm -->`);
-  lines.push(`  <!-- Black: ${blackCount} | White: ${whiteCnt} | Total: ${total} -->`);
-  lines.push(`  <rect width="${bedW}" height="${bedH}" fill="${colorSpace}"/>`);
+  lines.push(`  <title>Pixel Bead Placer \u2014 Laser Cut Template \u2014 ${cols}\u00d7${rows}</title>`);
+  lines.push(`  <!-- Bed: ${bedW}x${bedH}mm | Bead \u00d8: ${beadDiameterMm}mm | Gap: ${beadGapMm}mm | Pitch: ${beadSpacingMm}mm | Total holes: ${total} -->`);
+  lines.push(`  <!-- Stroke: red | Stroke-width: 0.1mm | Fill: none | For laser cutting -->`);
 
-  // Group by color to keep file size small
-  const whites = [];
-  const blacks = [];
+  // All geometry in one group: fill=none, stroke=red, stroke-width=0.1mm
+  lines.push(`  <g fill="none" stroke="red" stroke-width="0.1">`);
+
+  // Bed border
+  lines.push(`    <rect x="0" y="0" width="${bedW}" height="${bedH}"/>`);
+
+  // One circle per bead position — all holes identical regardless of color
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const cx = (c * beadSpacingMm + beadSpacingMm / 2).toFixed(3);
       const cy = (r * beadSpacingMm + beadSpacingMm / 2).toFixed(3);
-      (grid[r][c] === 1 ? blacks : whites).push(`    <circle cx="${cx}" cy="${cy}" r="${beadR}"/>`);
+      lines.push(`    <circle cx="${cx}" cy="${cy}" r="${beadR}"/>`);
     }
   }
 
-  if (whites.length > 0) {
-    lines.push(`  <g fill="${colorWhite}">`);
-    whites.forEach(l => lines.push(l));
-    lines.push(`  </g>`);
-  }
-  if (blacks.length > 0) {
-    lines.push(`  <g fill="${colorBlack}">`);
-    blacks.forEach(l => lines.push(l));
-    lines.push(`  </g>`);
-  }
-
+  lines.push(`  </g>`);
   lines.push(`</svg>`);
 
   const blob = new Blob([lines.join('\n')], { type: 'image/svg+xml' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = 'bead_art.svg';
+  a.download = 'bead_plate_lasercut.svg';
   a.click();
   URL.revokeObjectURL(a.href);
 });
