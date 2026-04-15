@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pixel Bead Placer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Pixel Bead Placer — CoreXY</h1>
+  <button id="btn-gcode" disabled>Generate &amp; Download GCode</button>
+</header>
+
+<main>
+  <aside>
+
+    <!-- 1. Bed & Bead Setup -->
+    <div>
+      <div class="section-label">Bed &amp; Bead Setup</div>
+      <div class="input-row">
+        <label for="bed-w">Bed width</label>
+        <input type="number" id="bed-w" value="400" min="10" max="2000" step="10">
+        <span class="unit">mm</span>
+      </div>
+      <div class="input-row">
+        <label for="bed-h">Bed height</label>
+        <input type="number" id="bed-h" value="400" min="10" max="2000" step="10">
+        <span class="unit">mm</span>
+      </div>
+      <div class="input-row">
+        <label for="bead-diameter">Bead size</label>
+        <input type="number" id="bead-diameter" value="6" min="0.5" max="200" step="0.5">
+        <span class="unit">mm</span>
+      </div>
+      <div class="input-row">
+        <label for="bead-gap">Gap</label>
+        <input type="number" id="bead-gap" value="1" min="0.1" max="50" step="0.1">
+        <span class="unit">mm</span>
+      </div>
+      <div class="hint">Edge-to-edge clearance between beads</div>
+      <div class="computed-row">
+        Spacing: <strong id="spacing-val">7.0</strong> mm &nbsp;<span class="computed-sub">center-to-center</span>
+      </div>
+      <button id="btn-apply">Apply Grid</button>
+    </div>
+
+    <!-- 2. Bead count stats (hidden until grid applied) -->
+    <div id="stats-section" style="display:none">
+      <div class="section-label">Bead Count</div>
+      <div id="grid-info"></div>
+      <div id="warning">Large grid — GCode file will be big.</div>
+    </div>
+
+    <!-- 3. Colors (always available) -->
+    <div>
+      <div class="section-label">Colors</div>
+      <div class="color-row">
+        <label for="color-black">Black bead</label>
+        <input type="color" id="color-black" value="#1a1a1a">
+      </div>
+      <div class="color-row">
+        <label for="color-white">White bead</label>
+        <input type="color" id="color-white" value="#f0f0f0">
+      </div>
+      <div class="color-row">
+        <label for="color-space">Space</label>
+        <input type="color" id="color-space" value="#999999">
+      </div>
+    </div>
+
+    <!-- 4. Tools (locked until grid applied) -->
+    <div>
+      <div class="section-label">Tools</div>
+      <div class="tool-group">
+        <button class="tool-btn active" data-tool="pen" disabled>&#9679; Pen (Black)</button>
+        <button class="tool-btn" data-tool="eraser" disabled>&#9675; Eraser (White)</button>
+        <button class="tool-btn" id="btn-path" disabled>&#9654; Show Path</button>
+      </div>
+    </div>
+
+    <!-- 5. Machine settings -->
+    <div>
+      <div class="section-label">Machine</div>
+      <div class="input-row">
+        <label for="origin-x">Origin X</label>
+        <input type="number" id="origin-x" value="0" min="-9999" max="9999" step="1">
+        <span class="unit">mm</span>
+      </div>
+      <div class="input-row">
+        <label for="origin-y">Origin Y</label>
+        <input type="number" id="origin-y" value="0" min="-9999" max="9999" step="1">
+        <span class="unit">mm</span>
+      </div>
+      <div class="input-row" style="margin-top:4px">
+        <label for="dwell-time">Dwell</label>
+        <input type="number" id="dwell-time" value="300" min="10" max="9999" step="10">
+        <span class="unit">ms</span>
+      </div>
+      <div class="hint">G-code origin offset &amp; dwell per bead</div>
+    </div>
+
+    <!-- 6. Actions (locked until grid applied) -->
+    <div>
+      <div class="section-label">Actions</div>
+      <div class="tool-group">
+        <button class="action-btn" id="btn-import" disabled>&#8682; Import Image</button>
+        <button class="action-btn" id="btn-svg" disabled>&#8681; Download SVG</button>
+        <button class="action-btn" id="btn-clear" disabled>&#10005; Clear All</button>
+      </div>
+      <input type="file" id="file-input" accept="image/*" style="display:none">
+    </div>
+
+  </aside>
+
+  <div id="canvas-wrapper">
+    <div id="placeholder">
+      Enter bed size and bead size<br>
+      then click <strong>Apply Grid</strong>
+    </div>
+    <canvas id="grid-canvas"></canvas>
+  </div>
+
+  <!-- Right panel: Machine Control -->
+  <section id="machine-panel">
+
+    <!-- 1. Serial Connection -->
+    <div class="mp-section">
+      <div class="mp-section-label">Serial Connection</div>
+      <button id="btn-serial-connect" class="mp-connect-btn">Connect USB</button>
+      <div class="mp-status-row">
+        <span id="serial-dot" class="serial-dot dot-off"></span>
+        <span id="serial-status-text">Disconnected</span>
+      </div>
+    </div>
+
+    <!-- 2. Pre-run Checklist -->
+    <div class="mp-section">
+      <div class="mp-section-label">Pre-run Checklist</div>
+      <ul class="chk-list">
+        <li id="chk-connect" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Connect to machine</span>
+        </li>
+        <li id="chk-home" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Home axes (limit switches)</span>
+          <button class="chk-btn" id="btn-chk-home" disabled>Run $H</button>
+        </li>
+        <li id="chk-origin" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Move to origin X/Y</span>
+          <button class="chk-btn" id="btn-chk-origin" disabled>Go</button>
+        </li>
+        <li id="chk-testx" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Test X axis movement</span>
+          <button class="chk-btn" id="btn-chk-testx" disabled>Test</button>
+        </li>
+        <li id="chk-testy" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Test Y axis movement</span>
+          <button class="chk-btn" id="btn-chk-testy" disabled>Test</button>
+        </li>
+        <li id="chk-testbead" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Test bead drop</span>
+          <button class="chk-btn" id="btn-chk-testbead" disabled>Test</button>
+        </li>
+        <li id="chk-ready" data-state="pending">
+          <span class="chk-icon">○</span><span class="chk-label">Ready to print</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 3. Machine State -->
+    <div class="mp-section">
+      <div class="mp-section-label">
+        Machine State
+        <button class="mp-mini-btn" id="btn-poll" disabled>?</button>
+      </div>
+      <div class="mc-state">
+        <span class="mc-lbl">Status</span><span id="mc-status" class="mc-val">—</span>
+        <span class="mc-lbl">X</span><span id="mc-pos-x" class="mc-val">—</span>
+        <span class="mc-lbl">Y</span><span id="mc-pos-y" class="mc-val">—</span>
+      </div>
+    </div>
+
+    <!-- 4. Jog Controls -->
+    <div class="mp-section">
+      <div class="mp-section-label">Jog Controls</div>
+      <div class="jog-pad">
+        <div></div>
+        <button class="jog-btn" id="jog-yp" disabled>Y+</button>
+        <div></div>
+        <button class="jog-btn" id="jog-xm" disabled>X−</button>
+        <button class="jog-btn jog-home-btn" id="jog-center" disabled>⌂</button>
+        <button class="jog-btn" id="jog-xp" disabled>X+</button>
+        <div></div>
+        <button class="jog-btn" id="jog-ym" disabled>Y−</button>
+        <div></div>
+      </div>
+      <div class="mp-row-inline">
+        <label>Step</label>
+        <select id="jog-step">
+          <option value="1">1 mm</option>
+          <option value="5">5 mm</option>
+          <option value="10" selected>10 mm</option>
+          <option value="50">50 mm</option>
+        </select>
+        <label>Feed</label>
+        <select id="jog-feed">
+          <option value="1000">slow</option>
+          <option value="3000" selected>med</option>
+          <option value="6000">fast</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 5. Print Job -->
+    <div class="mp-section">
+      <div class="mp-section-label">Print Job</div>
+      <div id="mp-job-info" class="mp-info">Apply grid settings first</div>
+      <div class="mp-progress-wrap">
+        <div class="mp-progress-fill" id="mp-progress-fill" style="width:0%"></div>
+      </div>
+      <div id="mp-progress-text" class="mp-info">—</div>
+      <div class="mp-btn-row">
+        <button class="mp-btn mp-btn-run" id="btn-run-gcode" disabled>&#9654; Run</button>
+        <button class="mp-btn" id="btn-pause-gcode" disabled>&#9208; Pause</button>
+        <button class="mp-btn mp-btn-stop" id="btn-stop-gcode" disabled>&#9632; Stop</button>
+      </div>
+    </div>
+
+    <!-- 6. Terminal -->
+    <div class="mp-section mp-terminal-wrap">
+      <div class="mp-section-label">
+        Terminal
+        <button class="mp-mini-btn" id="btn-clr-terminal">Clear</button>
+      </div>
+      <div id="serial-terminal"></div>
+      <div class="mp-send-row">
+        <input type="text" id="serial-cmd" placeholder="Send command (e.g. $X, ?)" disabled>
+        <button id="btn-send-cmd" disabled>Send</button>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
