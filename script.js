@@ -655,12 +655,26 @@ document.getElementById('btn-poll').addEventListener('click', () => {
 });
 
 // ── Manual terminal send ───────────────────────────────────────
-mpSendBtn.addEventListener('click', () => {
-  const cmd = mpCmdInput.value.trim();
-  if (!cmd || !serialWriter) return;
-  if (cmd === '?') { sendRaw('?'); }
-  else             { sendCmd(cmd).catch(() => {}); }
+// Supports \n as separator — e.g. "$X\n$22=0\nG0 X10 F500"
+// Each command is sent sequentially, waiting for ok before the next.
+mpSendBtn.addEventListener('click', async () => {
+  const raw = mpCmdInput.value.trim();
+  if (!raw || !serialWriter) return;
   mpCmdInput.value = '';
+  mpSendBtn.disabled = true;
+
+  // Split on literal \n typed by user OR actual newline characters
+  const cmds = raw.split(/\\n|\n/).map(c => c.trim()).filter(c => c.length > 0);
+  for (const cmd of cmds) {
+    try {
+      if (cmd === '?') sendRaw('?');
+      else await sendCmd(cmd);
+    } catch (e) {
+      termLog('Stopped at: ' + cmd + ' — ' + e.message, 'err');
+      break;
+    }
+  }
+  mpSendBtn.disabled = false;
 });
 mpCmdInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') mpSendBtn.click();
