@@ -94,11 +94,30 @@
         <span class="unit">mm</span>
       </div>
       <div class="input-row" style="margin-top:4px">
+        <label for="move-speed">Move speed</label>
+        <input type="number" id="move-speed" value="800" min="100" max="5000" step="100">
+        <span class="unit">mm/min</span>
+      </div>
+      <div class="input-row">
         <label for="dwell-time">Dwell</label>
         <input type="number" id="dwell-time" value="300" min="10" max="9999" step="10">
         <span class="unit">ms</span>
       </div>
-      <div class="hint">G-code origin offset &amp; dwell per bead</div>
+      <div class="input-row" style="margin-top:4px">
+        <label for="black-bead-side">Black bead</label>
+        <select id="black-bead-side">
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+        </select>
+      </div>
+      <div class="input-row">
+        <label for="white-bead-side">White bead</label>
+        <select id="white-bead-side">
+          <option value="right">Right</option>
+          <option value="left">Left</option>
+        </select>
+      </div>
+      <div class="hint">G-code origin offset, dwell &amp; bead sides</div>
     </div>
 
     <!-- 6. Actions (locked until grid applied) -->
@@ -161,6 +180,7 @@
         <li id="chk-testbead" data-state="pending">
           <span class="chk-icon">○</span><span class="chk-label">Test bead drop</span>
           <button class="chk-btn" id="btn-chk-testbead" disabled>Test</button>
+          <button class="chk-btn" id="btn-chk-testbead-skip" disabled>Skip</button>
         </li>
         <li id="chk-ready" data-state="pending">
           <span class="chk-icon">○</span><span class="chk-label">Ready to print</span>
@@ -220,6 +240,8 @@
         <div class="mp-progress-fill" id="mp-progress-fill" style="width:0%"></div>
       </div>
       <div id="mp-progress-text" class="mp-info">—</div>
+      <div id="mp-time-info" class="mp-info" style="font-size:11px;color:#aab">—</div>
+      <div id="run-hint" class="mp-info" style="color:#ffcc80;font-size:11px;display:none">Apply Grid first to enable Run</div>
       <div class="mp-btn-row">
         <button class="mp-btn mp-btn-run" id="btn-run-gcode" disabled>&#9654; Run</button>
         <button class="mp-btn" id="btn-pause-gcode" disabled>&#9208; Pause</button>
@@ -231,6 +253,7 @@
     <div class="mp-section mp-terminal-wrap">
       <div class="mp-section-label">
         Terminal
+        <button class="mp-mini-btn" id="btn-copy-terminal">Copy</button>
         <button class="mp-mini-btn" id="btn-clr-terminal">Clear</button>
       </div>
       <div id="serial-terminal"></div>

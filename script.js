@@ -7,9 +7,17 @@ const gapInput       = document.getElementById('bead-gap');
 const spacingValEl   = document.getElementById('spacing-val');
 const bedWInput      = document.getElementById('bed-w');
 const bedHInput      = document.getElementById('bed-h');
-const dwellInput     = document.getElementById('dwell-time');
-const originXInput   = document.getElementById('origin-x');
-const originYInput   = document.getElementById('origin-y');
+const dwellInput        = document.getElementById('dwell-time');
+const originXInput      = document.getElementById('origin-x');
+const originYInput      = document.getElementById('origin-y');
+const blackBeadSideInput = document.getElementById('black-bead-side');
+const whiteBeadSideInput = document.getElementById('white-bead-side');
+const moveSpeedInput     = document.getElementById('move-speed');
+
+// Servo S-values (calibrated)
+const S_LEFT  = 110;
+const S_REST  = 60;
+const S_RIGHT = 22;
 const gridInfoEl     = document.getElementById('grid-info');
 const warningEl      = document.getElementById('warning');
 const fileInput      = document.getElementById('file-input');
@@ -115,6 +123,7 @@ document.getElementById('btn-apply').addEventListener('click', () => {
   setToolsEnabled(true);
   updateStats();
   render();
+  updateTimeDisplay();
 });
 
 // ── Ruler label step ──────────────────────────────────────────
@@ -503,6 +512,7 @@ function buildGcodeLines() {
   const lines    = [];
   const now      = new Date().toISOString();
   const dwellMs  = Math.max(10, parseInt(dwellInput.value) || 300);
+  const feedRate = Math.max(100, parseInt(moveSpeedInput.value) || 800);
   const originX  = parseFloat(originXInput.value) || 0;
   const originY  = parseFloat(originYInput.value) || 0;
   const total    = cols * rows;
@@ -521,20 +531,27 @@ function buildGcodeLines() {
   lines.push(`; Dwell/bead    : ${dwellMs} ms`);
   lines.push(`; Generated     : ${now}`);
   lines.push(`;`);
-  lines.push(`; Color control (grbl_esp32 spindle outputs):`);
-  lines.push(`;   M3 S100  \u2192  Black bead feeder ON (spindle CW)`);
-  lines.push(`;   M4 S100  \u2192  White bead feeder ON (spindle CCW)`);
-  lines.push(`;   M5       \u2192  Feeder OFF`);
-  lines.push(`;   G4 P${dwellMs}  \u2192  Dwell ${dwellMs} ms`);
+  const blackSide = blackBeadSideInput.value; // 'left' | 'right'
+  const whiteSide = whiteBeadSideInput.value;
+  const S_BLACK   = blackSide === 'left' ? S_LEFT : S_RIGHT;
+  const S_WHITE   = whiteSide === 'left' ? S_LEFT : S_RIGHT;
+
+  lines.push(`; Servo control (GPIO 27, 50Hz PWM):`);
+  lines.push(`;   M3 S${S_LEFT}   \u2192  Left  bead`);
+  lines.push(`;   M3 S${S_RIGHT}   \u2192  Right bead`);
+  lines.push(`;   M3 S${S_REST}    \u2192  Rest (neutral)`);
+  lines.push(`;   BLACK bead = ${blackSide} side (M3 S${S_BLACK})`);
+  lines.push(`;   WHITE bead = ${whiteSide} side (M3 S${S_WHITE})`);
+  lines.push(`;   G4 P${(dwellMs/1000).toFixed(3)}  \u2192  Dwell ${dwellMs} ms (bead drop time)`);
   lines.push(`;`);
   lines.push(`; Snake path: even rows L\u2192R, odd rows R\u2192L`);
   lines.push(``);
   lines.push(`G21`);
   lines.push(`G90`);
+  lines.push(`M3 S${S_REST}`);
   lines.push(`G28`);
   lines.push(``);
 
-  let activeFeeder = -1;
   for (let r = 0; r < rows; r++) {
     const ltr = r % 2 === 0;
     lines.push(``);
@@ -544,17 +561,14 @@ function buildGcodeLines() {
       const color = grid[r][c];
       const xMm   = (originX + c * beadSpacingMm + beadSpacingMm / 2).toFixed(2);
       const yMm   = (originY + r * beadSpacingMm + beadSpacingMm / 2).toFixed(2);
-      if (color !== activeFeeder) {
-        if (activeFeeder !== -1) lines.push(`M5`);
-        lines.push(color === 1 ? `M3 S100` : `M4 S100`);
-        activeFeeder = color;
-      }
-      lines.push(`G0 X${xMm} Y${yMm} F3000`);
-      lines.push(`G4 P${dwellMs}`);
+      lines.push(`G1 X${xMm} Y${yMm} F${feedRate}`);
+      lines.push(`G4 P0`);
+      lines.push(color === 1 ? `M3 S${S_BLACK}` : `M3 S${S_WHITE}`);
+      lines.push(`G4 P${(dwellMs/1000).toFixed(3)}`);
+      lines.push(`M3 S${S_REST}`);
     }
   }
   lines.push(``);
-  lines.push(`M5`);
   lines.push(`G28`);
   lines.push(`M30`);
   return lines;
@@ -578,6 +592,7 @@ document.getElementById('btn-gcode').addEventListener('click', () => {
 
 // ── Serial state ──────────────────────────────────────────────
 let serialPort   = null;
+let pollTimer    = null;
 let serialWriter = null;
 let rxBuffer     = '';
 
@@ -586,10 +601,60 @@ let rxBuffer     = '';
 const cmdQueue = [];
 
 // ── Job state ─────────────────────────────────────────────────
-let jobLines   = [];   // all G-code lines to stream
-let jobIndex   = 0;    // next line index
+let jobLines   = [];
+let jobIndex   = 0;
 let jobRunning = false;
 let jobPaused  = false;
+let jobStartTime = null;
+let jobTimer     = null;
+
+function fmtTime(ms) {
+  const s = Math.round(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  return h > 0
+    ? `${h}h ${String(m % 60).padStart(2,'0')}m ${String(s % 60).padStart(2,'0')}s`
+    : `${String(m).padStart(2,'0')}m ${String(s % 60).padStart(2,'0')}s`;
+}
+
+function estimateJobMs() {
+  if (!gridReady || rows === 0 || cols === 0) return 0;
+  const dwellMs   = Math.max(10, parseInt(dwellInput.value) || 300);
+  const feedRate  = Math.max(100, parseInt(moveSpeedInput.value) || 800);
+  const feedMmMs  = feedRate / 60000;
+  const originX   = parseFloat(originXInput.value) || 0;
+  const originY   = parseFloat(originYInput.value) || 0;
+  let totalMs = 0, px = originX, py = originY;
+  for (let r = 0; r < rows; r++) {
+    const ltr = r % 2 === 0;
+    for (let ci = 0; ci < cols; ci++) {
+      const c  = ltr ? ci : (cols - 1 - ci);
+      const x  = originX + c * beadSpacingMm + beadSpacingMm / 2;
+      const y  = originY + r * beadSpacingMm + beadSpacingMm / 2;
+      const d  = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
+      totalMs += d / feedMmMs + dwellMs + 80; // travel + dwell + servo cmds
+      px = x; py = y;
+    }
+  }
+  return totalMs;
+}
+
+function updateTimeDisplay() {
+  const el = document.getElementById('mp-time-info');
+  if (!el) return;
+  if (!jobRunning && !jobPaused) {
+    if (gridReady) {
+      el.textContent = `Est. time: ${fmtTime(estimateJobMs())}`;
+    } else {
+      el.textContent = '—';
+    }
+    return;
+  }
+  const elapsed = Date.now() - jobStartTime;
+  const pct = jobLines.length > 0 ? jobIndex / jobLines.length : 0;
+  const eta = pct > 0.01 ? (elapsed / pct) - elapsed : estimateJobMs();
+  el.textContent = `Elapsed: ${fmtTime(elapsed)}  |  ETA: ${fmtTime(Math.max(0, eta))}`;
+}
 
 // ── Checklist state ───────────────────────────────────────────
 const CHK = { connect: false, home: false, origin: false, testX: false, testY: false, testBead: false };
@@ -629,16 +694,28 @@ document.getElementById('btn-clr-terminal').addEventListener('click', () => {
   mpTerminal.innerHTML = '';
 });
 
+document.getElementById('btn-copy-terminal').addEventListener('click', () => {
+  const text = Array.from(mpTerminal.querySelectorAll('.term-line'))
+    .map(el => el.textContent).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btn-copy-terminal');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
+});
+
 // ── Raw write (fire-and-forget) ────────────────────────────────
-async function sendRaw(cmd) {
+async function sendRaw(cmd, silent = false) {
   if (!serialWriter) return;
-  termLog(cmd, 'tx');
+  if (!silent) termLog(cmd, 'tx');
   try {
     await serialWriter.write(new TextEncoder().encode(cmd + '\n'));
   } catch (e) {
     termLog('Write error: ' + e.message, 'err');
   }
 }
+
+let silentOkCount = 0; // suppress ok responses from silent polls
 
 // ── Promise-based send (waits for GRBL 'ok') ─────────────────
 function sendCmd(cmd) {
@@ -698,8 +775,9 @@ async function doConnect() {
     startReading();
     onConnected(true);
     termLog('Port opened at 115200 baud', 'sys');
-    // GRBL sends a welcome message on connect; poll status after 1.2 s
-    setTimeout(() => { if (serialWriter) sendRaw('?'); }, 1200);
+    // Poll status once on connect, then every 2s while connected
+    setTimeout(() => { if (serialWriter) { silentOkCount++; sendRaw('?', true); } }, 1200);
+    pollTimer = setInterval(() => { if (serialWriter) { silentOkCount++; sendRaw('?', true); } }, 2000);
   } catch (err) {
     serialPort = null;
     if (err.name !== 'NotFoundError') termLog('Connect failed: ' + err.message, 'err');
@@ -707,6 +785,7 @@ async function doConnect() {
 }
 
 async function doDisconnect() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   const wasRunning = jobRunning || jobPaused;
   jobRunning = false;
   jobPaused  = false;
@@ -727,7 +806,7 @@ function onConnected(on) {
 
   // Toggle serial-dependent controls
   const serIds = ['btn-chk-home','btn-chk-origin','btn-chk-testx','btn-chk-testy',
-                  'btn-chk-testbead','btn-poll','jog-yp','jog-ym','jog-xp','jog-xm',
+                  'btn-chk-testbead','btn-chk-testbead-skip','btn-poll','jog-yp','jog-ym','jog-xp','jog-xm',
                   'jog-center','btn-send-cmd'];
   serIds.forEach(id => {
     const el = document.getElementById(id);
@@ -752,10 +831,26 @@ async function startReading() {
         const { value, done } = await reader.read();
         if (done) break;
         rxBuffer += decoder.decode(value, { stream: true });
-        let nl;
-        while ((nl = rxBuffer.indexOf('\n')) !== -1) {
-          const line = rxBuffer.slice(0, nl).replace(/\r/g, '').trim();
-          rxBuffer = rxBuffer.slice(nl + 1);
+        while (rxBuffer.length > 0) {
+          const ltIdx = rxBuffer.indexOf('<');
+          const gtIdx = rxBuffer.indexOf('>');
+          const nlIdx = rxBuffer.indexOf('\n');
+          // Complete status report <...> — extract and parse silently
+          if (ltIdx !== -1 && gtIdx !== -1 && ltIdx < gtIdx &&
+              (nlIdx === -1 || ltIdx <= nlIdx)) {
+            if (ltIdx > 0) {
+              // flush anything before the '<'
+              const before = rxBuffer.slice(0, ltIdx).replace(/\r/g, '').trim();
+              if (before) handleLine(before);
+            }
+            parseGrblStatus(rxBuffer.slice(ltIdx, gtIdx + 1));
+            rxBuffer = rxBuffer.slice(gtIdx + 1);
+            continue;
+          }
+          // Normal \n-terminated line
+          if (nlIdx === -1) break;
+          const line = rxBuffer.slice(0, nlIdx).replace(/\r/g, '').trim();
+          rxBuffer = rxBuffer.slice(nlIdx + 1);
           if (line) handleLine(line);
         }
       }
@@ -776,11 +871,15 @@ function handleLine(line) {
     return;
   }
 
+  if (line === 'ok' && silentOkCount > 0) {
+    silentOkCount--;
+    return; // suppress ok from auto-poll
+  }
+
   termLog(line, 'rx');
 
   if (line === 'ok') {
     if (jobRunning && !jobPaused) {
-      // Advance the job queue
       sendNextJobLine();
     } else if (cmdQueue.length) {
       cmdQueue.shift().resolve();
@@ -824,7 +923,7 @@ function parseGrblStatus(s) {
       st[1] === 'Hold:1'        ? '#ffcc80' :
       st[1].startsWith('Alarm') ? '#ff5722' : '#aab';
   }
-  const pos = s.match(/WPos:([-\d.]+),([-\d.]+)/);
+  const pos = s.match(/(?:WPos|MPos):([-\d.]+),([-\d.]+)/);
   if (pos) {
     mpMcPosX.textContent = parseFloat(pos[1]).toFixed(2) + ' mm';
     mpMcPosY.textContent = parseFloat(pos[2]).toFixed(2) + ' mm';
@@ -953,21 +1052,51 @@ document.getElementById('btn-chk-testbead').addEventListener('click', async () =
   const btn    = document.getElementById('btn-chk-testbead');
   btn.disabled = true;
   setChkBusy('testBead');
-  const dwellMs = Math.max(10, parseInt(dwellInput.value) || 300);
-  termLog(`Testing bead drop — M3 S100, dwell ${dwellMs} ms, M5`, 'sys');
+  const dwellMs   = Math.max(10, parseInt(dwellInput.value) || 300);
+  const blackSide = blackBeadSideInput.value;
+  const whiteSide = whiteBeadSideInput.value;
+  const S_BLACK   = blackSide === 'left' ? S_LEFT : S_RIGHT;
+  const S_WHITE   = whiteSide === 'left' ? S_LEFT : S_RIGHT;
+  const originX   = parseFloat(originXInput.value) || 0;
+  const originY   = parseFloat(originYInput.value) || 0;
+  const slot1X    = (originX + beadSpacingMm * 0.5).toFixed(2);
+  const slot1Y    = (originY + beadSpacingMm * 0.5).toFixed(2);
+  const slot2X    = (originX + beadSpacingMm * 1.5).toFixed(2);
+  const slot2Y    = slot1Y;
+  const feedRate  = Math.max(100, parseInt(moveSpeedInput.value) || 800);
+  termLog(`Testing servo bead drop — dwell ${dwellMs} ms, speed F${feedRate}`, 'sys');
   try {
-    await sendCmd('M3 S100');         // black feeder ON
-    await sendCmd(`G4 P${dwellMs}`); // dwell
-    await sendCmd('M5');              // feeder OFF
-    const ok = confirm(`Bead drop test complete.\n\nDid a bead drop successfully from the black feeder?\n\nClick OK to mark test passed, Cancel to retry.`);
+    termLog(`Moving to slot 1 (X${slot1X} Y${slot1Y}) → BLACK bead`, 'sys');
+    await sendCmd(`G1 X${slot1X} Y${slot1Y} F${feedRate}`);
+    await sendCmd(`G4 P0`);
+    await sendCmd(`M3 S${S_BLACK}`);
+    await sendCmd(`G4 P${(dwellMs/1000).toFixed(3)}`);
+    await sendCmd(`M3 S${S_REST}`);
+    const blackOk = confirm(`BLACK bead drop test.\n\nSlot 1 — ${blackSide.toUpperCase()} side (M3 S${S_BLACK}).\n\nDid a BLACK bead drop?\n\nOK = yes, Cancel = no/retry`);
+    if (!blackOk) { setChk('testBead', false); termLog('Black bead test failed — retry', 'err'); return; }
+
+    termLog(`Moving to slot 2 (X${slot2X} Y${slot2Y}) → WHITE bead`, 'sys');
+    await sendCmd(`G1 X${slot2X} Y${slot2Y} F${feedRate}`);
+    await sendCmd(`G4 P0`);
+    await sendCmd(`M3 S${S_WHITE}`);
+    await sendCmd(`G4 P${(dwellMs/1000).toFixed(3)}`);
+    await sendCmd(`M3 S${S_REST}`);
+    const whiteOk = confirm(`WHITE bead drop test.\n\nSlot 2 — ${whiteSide.toUpperCase()} side (M3 S${S_WHITE}).\n\nDid a WHITE bead drop?\n\nOK = yes, Cancel = no/retry`);
+    const ok = blackOk && whiteOk;
     setChk('testBead', ok);
-    termLog('Bead drop test ' + (ok ? 'PASSED' : 'failed — retry'), ok ? 'sys' : 'err');
+    termLog('Bead drop test ' + (ok ? 'PASSED (both colours)' : 'failed — retry'), ok ? 'sys' : 'err');
   } catch (err) {
     setChk('testBead', false);
     termLog('Bead test error: ' + err.message, 'err');
   } finally {
     btn.disabled = !serialPort;
   }
+});
+
+// ── Checklist: Skip bead drop test ───────────────────────────
+document.getElementById('btn-chk-testbead-skip').addEventListener('click', () => {
+  setChk('testBead', true);
+  termLog('Bead drop test skipped', 'sys');
 });
 
 // ── Jog controls ──────────────────────────────────────────────
@@ -1011,12 +1140,16 @@ mpRunBtn.addEventListener('click', () => {
     if (!confirm('Pre-run checklist is not fully complete.\n\nProceed anyway?')) return;
   }
 
-  jobLines   = buildGcodeLines();
-  jobIndex   = 0;
-  jobRunning = true;
-  jobPaused  = false;
-  termLog(`Job started — ${jobLines.length} total lines`, 'sys');
+  jobLines     = buildGcodeLines();
+  jobIndex     = 0;
+  jobRunning   = true;
+  jobPaused    = false;
+  jobStartTime = Date.now();
+  if (jobTimer) clearInterval(jobTimer);
+  jobTimer = setInterval(updateTimeDisplay, 1000);
+  termLog(`Job started — ${jobLines.length} total lines  (est. ${fmtTime(estimateJobMs())})`, 'sys');
   updateJobButtons();
+  updateTimeDisplay();
   sendNextJobLine();
 });
 
@@ -1029,14 +1162,16 @@ mpPauseBtn.addEventListener('click', () => {
 
 mpStopBtn.addEventListener('click', () => {
   if (!jobRunning && !jobPaused) return;
+  if (jobTimer) { clearInterval(jobTimer); jobTimer = null; }
   jobRunning = false;
   jobPaused  = false;
   jobLines   = [];
   jobIndex   = 0;
-  sendRaw('!');   // feed hold
-  setTimeout(() => { if (serialWriter) sendRaw('\x18'); }, 250); // soft reset
+  sendRaw('!');
+  setTimeout(() => { if (serialWriter) sendRaw('\x18'); }, 250);
   termLog('Job stopped — feed hold + soft reset sent', 'err');
   updateJobButtons();
+  updateTimeDisplay();
 });
 
 // ── Job line sender (called on each 'ok' when running) ────────
@@ -1052,8 +1187,11 @@ function sendNextJobLine() {
 
   if (jobIndex >= jobLines.length) {
     jobRunning = false;
-    termLog('Job complete!', 'sys');
+    if (jobTimer) { clearInterval(jobTimer); jobTimer = null; }
+    const elapsed = jobStartTime ? fmtTime(Date.now() - jobStartTime) : '—';
+    termLog(`Job complete! Total time: ${elapsed}`, 'sys');
     updateJobButtons();
+    updateTimeDisplay();
     return;
   }
 
@@ -1072,6 +1210,8 @@ function updateJobButtons() {
   mpRunBtn.textContent = jobPaused ? '\u25b6 Resume' : '\u25b6 Run';
   mpPauseBtn.disabled  = !running;
   mpStopBtn.disabled   = !jobRunning && !jobPaused;
+  const hint = document.getElementById('run-hint');
+  if (hint) hint.style.display = (serialPort && !gridReady) ? 'block' : 'none';
 
   // Disable jog + checklist buttons while job is active
   const lockDuringJob = jobRunning || jobPaused;
