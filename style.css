@@ -358,6 +358,30 @@ aside {
 }
 .chk-btn:hover:not(:disabled) { background: #2a4a8a; color: #fff; }
 .chk-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.chk-btn-apply {
+  background: #0e3020;
+  border-color: #1a5030;
+  color: #88dd99;
+}
+.chk-btn-apply:hover:not(:disabled) { background: #1a4030; color: #aaf0bb; }
+
+/* Servo calibration row inside checklist */
+.chk-servo-item { flex-wrap: wrap; align-items: flex-start; }
+.chk-servo-block {
+  width: 100%;
+  margin-top: 7px;
+  padding-left: 20px;
+}
+.servo-inputs-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 0.73rem;
+  color: #556;
+  margin-bottom: 6px;
+}
+.servo-btns-row { display: flex; gap: 5px; flex-wrap: wrap; }
 
 /* Machine state grid */
 .mc-state {
@@ -410,6 +434,17 @@ aside {
   font-size: 0.74rem;
   flex: 1;
 }
+.servo-num {
+  background: #0f3460;
+  border: 1px solid #1a4a8a;
+  color: #ccd;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  width: 52px;
+  text-align: center;
+}
+.servo-num:focus { outline: 1px solid #3a6aaa; }
 
 /* Print job */
 .mp-progress-wrap {

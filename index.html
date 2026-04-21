@@ -177,10 +177,24 @@
           <span class="chk-icon">○</span><span class="chk-label">Test Y axis movement</span>
           <button class="chk-btn" id="btn-chk-testy" disabled>Test</button>
         </li>
-        <li id="chk-testbead" data-state="pending">
-          <span class="chk-icon">○</span><span class="chk-label">Test bead drop</span>
-          <button class="chk-btn" id="btn-chk-testbead" disabled>Test</button>
-          <button class="chk-btn" id="btn-chk-testbead-skip" disabled>Skip</button>
+        <li id="chk-testbead" data-state="pending" class="chk-servo-item">
+          <span class="chk-icon">○</span><span class="chk-label">Servo Calibration</span>
+          <div class="chk-servo-block">
+            <div class="servo-inputs-row">
+              <label>S Left</label>
+              <input type="number" id="servo-s-left" class="servo-num" value="120" min="0" max="1000" step="1">
+              <label>S Rest</label>
+              <input type="number" id="servo-s-rest" class="servo-num" value="79" min="0" max="1000" step="1">
+              <label>S Right</label>
+              <input type="number" id="servo-s-right" class="servo-num" value="40" min="0" max="1000" step="1">
+            </div>
+            <div class="servo-btns-row">
+              <button class="chk-btn" id="btn-servo-test-left" disabled>&#8592; Test Left</button>
+              <button class="chk-btn" id="btn-servo-test-right" disabled>Test Right &#8594;</button>
+              <button class="chk-btn chk-btn-apply" id="btn-servo-apply">&#10003; Apply</button>
+            </div>
+            <div id="servo-applied-info" style="font-size:0.69rem;color:#4caf50;margin-top:4px"></div>
+          </div>
         </li>
         <li id="chk-ready" data-state="pending">
           <span class="chk-icon">○</span><span class="chk-label">Ready to print</span>

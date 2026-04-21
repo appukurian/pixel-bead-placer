@@ -13,11 +13,23 @@ const originYInput      = document.getElementById('origin-y');
 const blackBeadSideInput = document.getElementById('black-bead-side');
 const whiteBeadSideInput = document.getElementById('white-bead-side');
 const moveSpeedInput     = document.getElementById('move-speed');
+const servoSLeftInput    = document.getElementById('servo-s-left');
+const servoSRestInput    = document.getElementById('servo-s-rest');
+const servoSRightInput   = document.getElementById('servo-s-right');
 
-// Servo S-values (calibrated)
-const S_LEFT  = 110;
-const S_REST  = 60;
-const S_RIGHT = 22;
+// Servo S-values — updated when user clicks "Apply to GCode" in Servo Calibration
+let S_LEFT  = 120;
+let S_REST  = 79;
+let S_RIGHT = 40;
+
+// Read current S-values from the calibration inputs (for live testing before apply)
+function getInputServoValues() {
+  return {
+    sLeft:  parseInt(servoSLeftInput.value)  || S_LEFT,
+    sRest:  parseInt(servoSRestInput.value)  || S_REST,
+    sRight: parseInt(servoSRightInput.value) || S_RIGHT,
+  };
+}
 const gridInfoEl     = document.getElementById('grid-info');
 const warningEl      = document.getElementById('warning');
 const fileInput      = document.getElementById('file-input');
@@ -806,7 +818,7 @@ function onConnected(on) {
 
   // Toggle serial-dependent controls
   const serIds = ['btn-chk-home','btn-chk-origin','btn-chk-testx','btn-chk-testy',
-                  'btn-chk-testbead','btn-chk-testbead-skip','btn-poll','jog-yp','jog-ym','jog-xp','jog-xm',
+                  'btn-servo-test-left','btn-servo-test-right','btn-poll','jog-yp','jog-ym','jog-xp','jog-xm',
                   'jog-center','btn-send-cmd'];
   serIds.forEach(id => {
     const el = document.getElementById(id);
@@ -1046,57 +1058,55 @@ document.getElementById('btn-chk-testy').addEventListener('click', async () => {
   }
 });
 
-// ── Checklist action: Test bead drop ─────────────────────────
-document.getElementById('btn-chk-testbead').addEventListener('click', async () => {
-  if (!serialPort) return;
-  const btn    = document.getElementById('btn-chk-testbead');
-  btn.disabled = true;
-  setChkBusy('testBead');
-  const dwellMs   = Math.max(10, parseInt(dwellInput.value) || 300);
-  const blackSide = blackBeadSideInput.value;
-  const whiteSide = whiteBeadSideInput.value;
-  const S_BLACK   = blackSide === 'left' ? S_LEFT : S_RIGHT;
-  const S_WHITE   = whiteSide === 'left' ? S_LEFT : S_RIGHT;
-  const originX   = parseFloat(originXInput.value) || 0;
-  const originY   = parseFloat(originYInput.value) || 0;
-  const slot1X    = (originX + beadSpacingMm * 0.5).toFixed(2);
-  const slot1Y    = (originY + beadSpacingMm * 0.5).toFixed(2);
-  const slot2X    = (originX + beadSpacingMm * 1.5).toFixed(2);
-  const slot2Y    = slot1Y;
-  const feedRate  = Math.max(100, parseInt(moveSpeedInput.value) || 800);
-  termLog(`Testing servo bead drop — dwell ${dwellMs} ms, speed F${feedRate}`, 'sys');
-  try {
-    termLog(`Moving to slot 1 (X${slot1X} Y${slot1Y}) → BLACK bead`, 'sys');
-    await sendCmd(`G1 X${slot1X} Y${slot1Y} F${feedRate}`);
-    await sendCmd(`G4 P0`);
-    await sendCmd(`M3 S${S_BLACK}`);
-    await sendCmd(`G4 P${(dwellMs/1000).toFixed(3)}`);
-    await sendCmd(`M3 S${S_REST}`);
-    const blackOk = confirm(`BLACK bead drop test.\n\nSlot 1 — ${blackSide.toUpperCase()} side (M3 S${S_BLACK}).\n\nDid a BLACK bead drop?\n\nOK = yes, Cancel = no/retry`);
-    if (!blackOk) { setChk('testBead', false); termLog('Black bead test failed — retry', 'err'); return; }
 
-    termLog(`Moving to slot 2 (X${slot2X} Y${slot2Y}) → WHITE bead`, 'sys');
-    await sendCmd(`G1 X${slot2X} Y${slot2Y} F${feedRate}`);
-    await sendCmd(`G4 P0`);
-    await sendCmd(`M3 S${S_WHITE}`);
-    await sendCmd(`G4 P${(dwellMs/1000).toFixed(3)}`);
-    await sendCmd(`M3 S${S_REST}`);
-    const whiteOk = confirm(`WHITE bead drop test.\n\nSlot 2 — ${whiteSide.toUpperCase()} side (M3 S${S_WHITE}).\n\nDid a WHITE bead drop?\n\nOK = yes, Cancel = no/retry`);
-    const ok = blackOk && whiteOk;
-    setChk('testBead', ok);
-    termLog('Bead drop test ' + (ok ? 'PASSED (both colours)' : 'failed — retry'), ok ? 'sys' : 'err');
-  } catch (err) {
-    setChk('testBead', false);
-    termLog('Bead test error: ' + err.message, 'err');
+// ── Servo Calibration (inside checklist) ──────────────────────
+document.getElementById('btn-servo-test-left').addEventListener('click', async () => {
+  if (!serialPort) return;
+  const btn = document.getElementById('btn-servo-test-left');
+  btn.disabled = true;
+  const { sLeft, sRest } = getInputServoValues();
+  const dwellMs = Math.max(10, parseInt(dwellInput.value) || 300);
+  termLog(`Servo test — LEFT  M3 S${sLeft}, dwell ${dwellMs} ms`, 'sys');
+  try {
+    await sendCmd(`M3 S${sLeft}`);
+    await sendCmd(`G4 P${(dwellMs / 1000).toFixed(3)}`);
+    await sendCmd(`M3 S${sRest}`);
+    termLog('Test fired — servo moved LEFT and returned to rest', 'sys');
+  } catch (e) {
+    termLog('Servo test error: ' + e.message, 'err');
   } finally {
     btn.disabled = !serialPort;
   }
 });
 
-// ── Checklist: Skip bead drop test ───────────────────────────
-document.getElementById('btn-chk-testbead-skip').addEventListener('click', () => {
+document.getElementById('btn-servo-test-right').addEventListener('click', async () => {
+  if (!serialPort) return;
+  const btn = document.getElementById('btn-servo-test-right');
+  btn.disabled = true;
+  const { sRest, sRight } = getInputServoValues();
+  const dwellMs = Math.max(10, parseInt(dwellInput.value) || 300);
+  termLog(`Servo test — RIGHT  M3 S${sRight}, dwell ${dwellMs} ms`, 'sys');
+  try {
+    await sendCmd(`M3 S${sRight}`);
+    await sendCmd(`G4 P${(dwellMs / 1000).toFixed(3)}`);
+    await sendCmd(`M3 S${sRest}`);
+    termLog('Test fired — servo moved RIGHT and returned to rest', 'sys');
+  } catch (e) {
+    termLog('Servo test error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = !serialPort;
+  }
+});
+
+document.getElementById('btn-servo-apply').addEventListener('click', () => {
+  const { sLeft, sRest, sRight } = getInputServoValues();
+  S_LEFT  = sLeft;
+  S_REST  = sRest;
+  S_RIGHT = sRight;
+  document.getElementById('servo-applied-info').textContent =
+    `Applied → S_LEFT=${S_LEFT}  S_REST=${S_REST}  S_RIGHT=${S_RIGHT}`;
   setChk('testBead', true);
-  termLog('Bead drop test skipped', 'sys');
+  termLog(`Servo values applied to GCode: S_LEFT=${S_LEFT}  S_REST=${S_REST}  S_RIGHT=${S_RIGHT}`, 'sys');
 });
 
 // ── Jog controls ──────────────────────────────────────────────
@@ -1219,7 +1229,8 @@ function updateJobButtons() {
     const el = document.getElementById(id);
     if (el) el.disabled = !serialPort || lockDuringJob;
   });
-  ['btn-chk-home','btn-chk-origin','btn-chk-testx','btn-chk-testy','btn-chk-testbead'].forEach(id => {
+  ['btn-chk-home','btn-chk-origin','btn-chk-testx','btn-chk-testy',
+   'btn-servo-test-left','btn-servo-test-right'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = !serialPort || lockDuringJob;
   });
