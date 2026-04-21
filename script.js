@@ -582,7 +582,7 @@ function buildGcodeLines() {
     }
   }
   lines.push(``);
-  lines.push(`G1 X0 Y${bedH.toFixed(2)} F3000`);
+  lines.push(`G1 X${bedW.toFixed(2)} Y${bedH.toFixed(2)} F3000`);
   lines.push(`M30`);
   return lines;
 }
