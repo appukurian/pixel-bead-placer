@@ -562,6 +562,7 @@ function buildGcodeLines() {
   lines.push(`G90`);
   lines.push(`M3 S${S_REST}`);
   lines.push(`G28`);
+  lines.push(`G1 X${originX.toFixed(2)} Y${originY.toFixed(2)} F3000`);
   lines.push(``);
 
   for (let r = 0; r < rows; r++) {
@@ -581,6 +582,7 @@ function buildGcodeLines() {
     }
   }
   lines.push(``);
+  lines.push(`G1 X0 Y${bedH.toFixed(2)} F3000`);
   lines.push(`G28`);
   lines.push(`M30`);
   return lines;
