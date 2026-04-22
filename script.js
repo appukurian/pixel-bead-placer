@@ -582,7 +582,7 @@ function buildGcodeLines() {
     }
   }
   lines.push(``);
-  lines.push(`G1 X400 Y400 F3000`);
+  lines.push(`G1 X0 Y400 F300`);
   lines.push(`M30`);
   return lines;
 }
